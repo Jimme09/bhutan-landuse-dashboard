@@ -46,7 +46,7 @@ app.get("/api/v1/statistics/:regionName", async (req, res) => {
     ) {
       queryText = `
                 SELECT class_name, SUM(area_sqkm) as total_area
-                FROM bhutan.landuse
+                FROM bhutan.landuse_2020
                 GROUP BY class_name
                 ORDER BY class_name;
             `;
@@ -54,7 +54,7 @@ app.get("/api/v1/statistics/:regionName", async (req, res) => {
       // Parameterized query ($1) handles string safety and spaces cleanly
       queryText = `
                 SELECT class_name, SUM(area_sqkm) as total_area
-                FROM bhutan.landuse
+                FROM bhutan.landuse_2020
                 WHERE LOWER(dzongkhag) = LOWER($1)
                 GROUP BY class_name
                 ORDER BY class_name;
