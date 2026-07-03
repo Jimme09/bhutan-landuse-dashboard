@@ -43,7 +43,6 @@ function initSpatialMap() {
       plainBasemap.setVisible(event.target.checked);
     });
 }
-5;
 
 function initDataCharts() {
   const ctx = document.getElementById("dashboardChart").getContext("2d");
@@ -219,10 +218,7 @@ function bindUserActionInterceptors() {
       const pickedRegion = event.target.value;
       console.log("Controller caught filter action for: " + pickedRegion);
 
-      const updatedDataset =
-        await DashboardModel.fetchRegionStats(pickedRegion);
-      statsChart.data.datasets[0].data = updatedDataset;
-      statsChart.update();
+      await triggerStatisticsRefresh(pickedRegion);
     });
 
   // Listener B: Active Map Layer Dropdown (Updates Map Canvas)
