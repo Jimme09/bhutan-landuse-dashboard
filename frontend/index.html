@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bhutan Geo-Dashboard (MVC)</title>
+
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.15.1/css/ol.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="./css/styles.css" />
+  </head>
+  <body>
+    <div class="dashboard-wrapper">
+      <aside class="sidebar">
+        <header class="brand">
+          <h1>Bhutan Analytics</h1>
+          <span class="badge">MVC Architecture</span>
+        </header>
+
+        <div class="control-box">
+          <label for="layer-selector">Active Map Layer</label>
+          <select id="layer-selector">
+            <option value="dzongkhag">Dzongkhag Boundaries</option>
+            <option value="gewog">Gewog Boundaries</option>
+            <option value="landuse">Land Use Land Cover 2020</option>
+          </select>
+        </div>
+
+        <div class="control-box">
+          <label for="data-filter">Filter District Statistics</label>
+          <select id="data-filter">
+            <option value="National">All Districts (National)</option>
+            <option value="Bumthang">Bumthang</option>
+            <option value="Thimphu">Thimphu</option>
+            <option value="Paro">Paro</option>
+            <option value="Punakha">Punakha</option>
+          </select>
+        </div>
+
+        <div class="chart-box">
+          <h3>Area Distribution Metrics</h3>
+          <canvas id="dashboardChart"></canvas>
+        </div>
+
+        <footer class="app-status">
+          <p>
+            Status:
+            <span id="backend-status" class="status-placeholder"
+              >Static Mock Engine Active</span
+            >
+          </p>
+        </footer>
+      </aside>
+
+      <main id="map-workspace" class="map-container">
+        <div class="control-box">
+          <input type="checkbox" id="basemap-toggle" checked />
+          <label for="basemap-toggle">Show Basemap</label>
+        </div>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.15.1/build/ol.js"></script>
+
+    <script src="js/model.js"></script>
+    <script src="js/controller.js"></script>
+  </body>
+</html>
