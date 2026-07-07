@@ -92,6 +92,71 @@ app.get("/api/v1/statistics/:regionName", async (req, res) => {
       .json({ status: "error", error: "Internal Server Database Exception" });
   }
 });
+// <-- PASTE THE NEW /api/v1/change/:regionName ENDPOINT HERE -->
+
+/**
+ * TEMPORAL CHANGE-DETECTION ENDPOINT
+ * Computes a land-use transition matrix between 2016 and 2020 for a given district
+ */
+app.get("/api/v1/change/:regionName", async (req, res) => {
+  const regionName = req.params.regionName;
+  console.log(
+    `[API Server] Change-detection request for region: ${regionName}`,
+  );
+
+  try {
+    let queryText = "";
+    let queryParams = [];
+
+    const baseQuery = `
+      SELECT
+        CASE WHEN a.class = 'Cultivated Agriculture' THEN 'Agriculture Land' ELSE a.class END AS class_2016,
+        b.class_name AS class_2020,
+        ROUND(SUM(ST_Area(ST_Intersection(a.geom, b.geom)::geography))::numeric / 1e6, 2) AS area_sqkm
+      FROM bhutan.landuse_2016 a
+      JOIN bhutan.landuse_2020 b ON ST_Intersects(a.geom, b.geom)
+    `;
+
+    if (
+      regionName === "National" ||
+      regionName === "All Districts (National)"
+    ) {
+      queryText = `
+        ${baseQuery}
+        GROUP BY class_2016, class_2020
+        ORDER BY area_sqkm DESC;
+      `;
+    } else {
+      queryText = `
+        ${baseQuery}
+        WHERE LOWER(a.dzgname) = LOWER($1)
+        GROUP BY class_2016, class_2020
+        ORDER BY area_sqkm DESC;
+      `;
+      queryParams = [regionName];
+    }
+
+    const dbResult = await pool.query(queryText, queryParams);
+
+    if (dbResult.rows.length === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: `No change data found for region: ${regionName}`,
+      });
+    }
+
+    res.json({
+      status: "success",
+      region: regionName,
+      transitions: dbResult.rows,
+    });
+  } catch (error) {
+    console.error("💥 PostGIS Change Query Error:", error.message);
+    res
+      .status(500)
+      .json({ status: "error", error: "Internal Server Database Exception" });
+  }
+});
 
 // Default diagnostics root path
 app.get("/", (req, res) => {
