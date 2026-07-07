@@ -14,11 +14,11 @@
   </head>
   <body>
     <div class="dashboard-wrapper">
-      <aside class="sidebar">
-        <header class="brand">
-          <h1>Bhutan Analytics</h1>
-          <span class="badge">MVC Architecture</span>
-        </header>
+      <!-- Top bar: branding + controls -->
+      <header class="topbar">
+        <div class="brand">
+          <h1>Bhutan Analytics <span class="badge">MVC Architecture</span></h1>
+        </div>
 
         <div class="control-box">
           <label for="layer-selector">Active Map Layer</label>
@@ -39,28 +39,67 @@
             <option value="Punakha">Punakha</option>
           </select>
         </div>
+      </header>
 
-        <div class="chart-box">
-          <h3>Area Distribution Metrics</h3>
-          <canvas id="dashboardChart"></canvas>
-        </div>
-
-        <footer class="app-status">
-          <p>
-            Status:
-            <span id="backend-status" class="status-placeholder"
-              >Static Mock Engine Active</span
-            >
-          </p>
-        </footer>
-      </aside>
-
+      <!-- Full-width map -->
       <main id="map-workspace" class="map-container">
         <div class="control-box">
           <input type="checkbox" id="basemap-toggle" checked />
           <label for="basemap-toggle">Show Basemap</label>
         </div>
       </main>
+
+      <!-- Stats panel below the map: charts side-by-side -->
+      <section class="stats-panel">
+        <div class="chart-box">
+          <h3>Area Distribution Metrics</h3>
+          <canvas id="dashboardChart"></canvas>
+        </div>
+
+        <div class="chart-box">
+          <h3>Land-Use Change (2016–2020)</h3>
+          <canvas id="changeChart"></canvas>
+        </div>
+
+        <div class="chart-box transition-box">
+          <h3>Transition Detail</h3>
+          <button id="toggle-transition-table">
+            Show full transition table
+          </button>
+          <div
+            id="transition-table-container"
+            style="
+              display: none;
+              max-height: 220px;
+              overflow-y: auto;
+              margin-top: 10px;
+            "
+          >
+            <table
+              id="transition-table"
+              style="width: 100%; font-size: 12px; border-collapse: collapse"
+            >
+              <thead>
+                <tr>
+                  <th style="text-align: left">2016 Class</th>
+                  <th style="text-align: left">2020 Class</th>
+                  <th style="text-align: right">Area (km²)</th>
+                </tr>
+              </thead>
+              <tbody id="transition-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <footer class="app-status">
+        <p>
+          Status:
+          <span id="backend-status" class="status-placeholder"
+            >Live PostGIS Connection Active</span
+          >
+        </p>
+      </footer>
     </div>
 
     <script src="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.15.1/build/ol.js"></script>

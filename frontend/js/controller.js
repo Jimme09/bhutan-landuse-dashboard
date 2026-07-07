@@ -4,15 +4,18 @@
 let olMap;
 let activeWmsOverlay; // Tracks the current active MapServer WMS layer
 let statsChart;
+let changeChart; // Tracks the land-use change (2016-2020) bar chart instance
 
 document.addEventListener("DOMContentLoaded", async function () {
   initSpatialMap();
 
   // 1. Initialize the chart instance with a blank state
   initDataCharts();
+  initChangeChart();
 
   // 2. Automatically request National metrics on dashboard startup
   await triggerStatisticsRefresh("National");
+  await triggerChangeRefresh("National");
 
   bindUserActionInterceptors();
 });
@@ -97,6 +100,40 @@ function initDataCharts() {
 }
 
 /**
+ * Initializes the "Land-Use Change" bar chart with a blank state.
+ * This chart shows net area gained/lost per class between 2016 and 2020.
+ */
+function initChangeChart() {
+  const ctx = document.getElementById("changeChart").getContext("2d");
+
+  changeChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: [], // Will hold class names (e.g. "Forests", "Agriculture Land")
+      datasets: [
+        {
+          label: "Net Change (km²)",
+          data: [], // Will hold net area change values (positive = gained, negative = lost)
+          backgroundColor: [], // Set dynamically: green for gains, red for losses
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: "km²" },
+        },
+      },
+    },
+  });
+}
+
+/**
  * Worker Function: Queries your local Node.js API server for chart metrics
  */
 async function triggerStatisticsRefresh(regionName) {
@@ -115,6 +152,76 @@ async function triggerStatisticsRefresh(regionName) {
   } catch (error) {
     console.error(
       "[Controller] Failed to pass database values to chart view:",
+      error,
+    );
+  }
+}
+
+/**
+ * Worker Function: Queries the change-detection API and renders both
+ * the net-change bar chart and the full transition table.
+ */
+async function triggerChangeRefresh(regionName) {
+  try {
+    console.log(`[Controller] Querying Model for change data: ${regionName}`);
+    const responseData = await DashboardModel.fetchRegionChange(regionName);
+
+    if (responseData && responseData.transitions) {
+      const transitions = responseData.transitions;
+
+      // 1. Compute NET change per class: area gained minus area lost.
+      // A transition row means "this much area moved FROM class_2016 TO class_2020".
+      // So class_2016 loses that area, and class_2020 gains it.
+      const netChangeByClass = {};
+
+      transitions.forEach((row) => {
+        const from = row.class_2016;
+        const to = row.class_2020;
+        const area = parseFloat(row.area_sqkm);
+
+        if (!netChangeByClass[from]) netChangeByClass[from] = 0;
+        if (!netChangeByClass[to]) netChangeByClass[to] = 0;
+
+        netChangeByClass[from] -= area; // lost from this class
+        netChangeByClass[to] += area; // gained into this class
+      });
+
+      // 2. Convert the {className: netValue} object into parallel arrays for Chart.js
+      const labels = Object.keys(netChangeByClass);
+      const values = labels.map((label) =>
+        parseFloat(netChangeByClass[label].toFixed(2)),
+      );
+      // Green if the class gained area overall, red if it lost area
+      const colors = values.map((v) => (v >= 0 ? "#2e8b57" : "#c0392b"));
+
+      changeChart.data.labels = labels;
+      changeChart.data.datasets[0].data = values;
+      changeChart.data.datasets[0].backgroundColor = colors;
+      changeChart.update();
+
+      // 3. Populate the full transition table (only rows where class actually changed)
+      const tableBody = document.getElementById("transition-table-body");
+      tableBody.innerHTML = ""; // Clear any previous rows before adding new ones
+
+      transitions
+        .filter((row) => row.class_2016 !== row.class_2020)
+        .forEach((row) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.class_2016}</td>
+            <td>${row.class_2020}</td>
+            <td style="text-align:right;">${row.area_sqkm}</td>
+          `;
+          tableBody.appendChild(tr);
+        });
+
+      console.log(
+        `[Controller] Change chart populated with ${labels.length} classes.`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      "[Controller] Failed to process land-use change data:",
       error,
     );
   }
@@ -219,6 +326,7 @@ function bindUserActionInterceptors() {
       console.log("Controller caught filter action for: " + pickedRegion);
 
       await triggerStatisticsRefresh(pickedRegion);
+      await triggerChangeRefresh(pickedRegion); // <-- NEW: also refresh change chart
     });
 
   // Listener B: Active Map Layer Dropdown (Updates Map Canvas)
@@ -229,5 +337,17 @@ function bindUserActionInterceptors() {
       console.log("[Controller] Dropdown selected layer: " + selectedLayer);
 
       updateMapLayerOverlay(selectedLayer);
+    });
+
+  // Listener C: Toggle button for showing/hiding the full transition table  <-- NEW BLOCK
+  document
+    .getElementById("toggle-transition-table")
+    .addEventListener("click", function () {
+      const container = document.getElementById("transition-table-container");
+      const isHidden = container.style.display === "none";
+      container.style.display = isHidden ? "block" : "none";
+      this.textContent = isHidden
+        ? "Hide full transition table"
+        : "Show full transition table";
     });
 }

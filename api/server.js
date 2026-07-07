@@ -122,8 +122,8 @@ app.get("/api/v1/change/:regionName", async (req, res) => {
       regionName === "All Districts (National)"
     ) {
       queryText = `
-        ${baseQuery}
-        GROUP BY class_2016, class_2020
+        SELECT class_2016, class_2020, area_sqkm
+        FROM bhutan.national_transitions
         ORDER BY area_sqkm DESC;
       `;
     } else {

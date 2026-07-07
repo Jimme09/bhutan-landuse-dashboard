@@ -26,4 +26,24 @@ const DashboardModel = {
       return null;
     }
   },
+
+  /**
+   * Fetches the land-use transition matrix (2016 vs 2020) for a given district
+   * from the /api/v1/change/:regionName endpoint.
+   */
+  fetchRegionChange: async function (regionName) {
+    try {
+      const response = await fetch(
+        `${this.apiBaseUrl}/change/${encodeURIComponent(regionName)}`,
+      );
+      if (!response.ok)
+        throw new Error(`Network problem detected. Status: ${response.status}`);
+
+      const jsonResponse = await response.json();
+      return jsonResponse; // Returns full structured entity: {status, region, transitions}
+    } catch (error) {
+      console.error("Model failed to retrieve land-use change data:", error);
+      return null;
+    }
+  },
 };
