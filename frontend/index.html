@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bhutan Geo-Dashboard (MVC)</title>
+    <title>Bhutan Spatio-Temporal Land-Use Explorer</title>
 
     <link
       rel="stylesheet"
@@ -17,13 +17,15 @@
       <!-- Top bar: branding + controls -->
       <header class="topbar">
         <div class="brand">
-          <h1>Bhutan Analytics <span class="badge">MVC Architecture</span></h1>
+          <h1>
+            Bhutan Spatio-Temporal Land-Use Explorer
+            <span class="badge">MVC Architecture</span>
+          </h1>
         </div>
 
         <div class="control-box">
           <label for="layer-selector">Active Map Layer</label>
           <select id="layer-selector">
-            <option value="dzongkhag">Dzongkhag Boundaries</option>
             <option value="gewog">Gewog Boundaries</option>
             <option value="landuse_2020">Land Use Land Cover 2020</option>
           </select>
@@ -34,9 +36,25 @@
           <select id="data-filter">
             <option value="National">All Districts (National)</option>
             <option value="Bumthang">Bumthang</option>
-            <option value="Thimphu">Thimphu</option>
+            <option value="Chhukha">Chhukha</option>
+            <option value="Dagana">Dagana</option>
+            <option value="Gasa">Gasa</option>
+            <option value="Haa">Haa</option>
+            <option value="Lhuentse">Lhuentse</option>
+            <option value="Mongar">Mongar</option>
             <option value="Paro">Paro</option>
+            <option value="Pemagatshel">Pemagatshel</option>
             <option value="Punakha">Punakha</option>
+            <option value="Samdrup Jongkhar">Samdrup Jongkhar</option>
+            <option value="Samtse">Samtse</option>
+            <option value="Sarpang">Sarpang</option>
+            <option value="Thimphu">Thimphu</option>
+            <option value="Trashigang">Trashigang</option>
+            <option value="Trashiyangtse">Trashiyangtse</option>
+            <option value="Trongsa">Trongsa</option>
+            <option value="Tsirang">Tsirang</option>
+            <option value="Wangdue Phodrang">Wangdue Phodrang</option>
+            <option value="Zhemgang">Zhemgang</option>
           </select>
         </div>
       </header>

@@ -31,8 +31,23 @@ pool.query("SELECT NOW()", (err, res) => {
  * LIVE API ENDPOINT
  * Fetches data directly from PostGIS and aggregates areas by landuse class name
  */
+
+// Reconciles district-name spelling differences between the boundary layer
+// (bhutan.dzongkhag) and the land-use data tables (bhutan.landuse_2020/2016),
+// which use slightly different official spellings for the same districts.
+const districtNameMap = {
+  Mongar: "Monggar",
+  "Samdrup Jongkhar": "Samdrupjongkhar",
+  "Tashi Yangtse": "Trashiyangtse",
+  Tashigang: "Trashigang",
+  "Wangdue Phodrang": "Wangduephodrang",
+};
+
+function resolveDistrictName(name) {
+  return districtNameMap[name] || name;
+}
 app.get("/api/v1/statistics/:regionName", async (req, res) => {
-  const regionName = req.params.regionName;
+  const regionName = resolveDistrictName(req.params.regionName);
   console.log(`[API Server] Request received for region: ${regionName}`);
 
   try {
@@ -95,11 +110,87 @@ app.get("/api/v1/statistics/:regionName", async (req, res) => {
 // <-- PASTE THE NEW /api/v1/change/:regionName ENDPOINT HERE -->
 
 /**
+ * GEOJSON ENDPOINT: Serves dzongkhag boundaries as GeoJSON for the
+ * interactive (clickable) map layer, instead of static WMS tiles.
+ */
+app.get("/api/v1/geojson/dzongkhag", async (req, res) => {
+  try {
+    const queryText = `
+      SELECT jsonb_build_object(
+        'type', 'FeatureCollection',
+        'features', jsonb_agg(
+          jsonb_build_object(
+            'type', 'Feature',
+            'geometry', ST_AsGeoJSON(geom)::jsonb,
+            'properties', jsonb_build_object('dzongkhag', dzongkhag)
+          )
+        )
+      ) AS geojson
+      FROM bhutan.dzongkhag;
+    `;
+    const dbResult = await pool.query(queryText);
+    res.json(dbResult.rows[0].geojson);
+  } catch (error) {
+    console.error("💥 GeoJSON Export Error:", error.message);
+    res.status(500).json({
+      status: "error",
+      error: "Failed to export dzongkhag boundaries",
+    });
+  }
+});
+
+/**
+ * CHOROPLETH DATA ENDPOINT
+ * Returns one land-use class's area broken down by every district —
+ * used to color the dzongkhag map based on a selected class.
+ */
+app.get("/api/v1/class-breakdown/:className", async (req, res) => {
+  const className = req.params.className;
+  console.log(`[API Server] Class breakdown request for: ${className}`);
+
+  try {
+    const queryText = `
+      SELECT dzongkhag, SUM(area_sqkm) as total_area
+      FROM bhutan.landuse_2020
+      WHERE LOWER(class_name) = LOWER($1)
+      GROUP BY dzongkhag
+      ORDER BY dzongkhag;
+    `;
+    const dbResult = await pool.query(queryText, [className]);
+
+    if (dbResult.rows.length === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: `No data found for class: ${className}`,
+      });
+    }
+
+    // Build a simple {districtName: area} lookup, since that's what the
+    // frontend needs to match against map features by name.
+    const breakdown = {};
+    dbResult.rows.forEach((row) => {
+      breakdown[row.dzongkhag] = parseFloat(row.total_area);
+    });
+
+    res.json({
+      status: "success",
+      class_name: className,
+      breakdown: breakdown,
+    });
+  } catch (error) {
+    console.error("💥 PostGIS Class Breakdown Error:", error.message);
+    res
+      .status(500)
+      .json({ status: "error", error: "Internal Server Database Exception" });
+  }
+});
+
+/**
  * TEMPORAL CHANGE-DETECTION ENDPOINT
  * Computes a land-use transition matrix between 2016 and 2020 for a given district
  */
 app.get("/api/v1/change/:regionName", async (req, res) => {
-  const regionName = req.params.regionName;
+  const regionName = resolveDistrictName(req.params.regionName);
   console.log(
     `[API Server] Change-detection request for region: ${regionName}`,
   );
@@ -107,15 +198,6 @@ app.get("/api/v1/change/:regionName", async (req, res) => {
   try {
     let queryText = "";
     let queryParams = [];
-
-    const baseQuery = `
-      SELECT
-        CASE WHEN a.class = 'Cultivated Agriculture' THEN 'Agriculture Land' ELSE a.class END AS class_2016,
-        b.class_name AS class_2020,
-        ROUND(SUM(ST_Area(ST_Intersection(a.geom, b.geom)::geography))::numeric / 1e6, 2) AS area_sqkm
-      FROM bhutan.landuse_2016 a
-      JOIN bhutan.landuse_2020 b ON ST_Intersects(a.geom, b.geom)
-    `;
 
     if (
       regionName === "National" ||
@@ -128,9 +210,9 @@ app.get("/api/v1/change/:regionName", async (req, res) => {
       `;
     } else {
       queryText = `
-        ${baseQuery}
-        WHERE LOWER(a.dzgname) = LOWER($1)
-        GROUP BY class_2016, class_2020
+        SELECT class_2016, class_2020, area_sqkm
+        FROM bhutan.district_transitions
+        WHERE LOWER(dzongkhag) = LOWER($1)
         ORDER BY area_sqkm DESC;
       `;
       queryParams = [regionName];

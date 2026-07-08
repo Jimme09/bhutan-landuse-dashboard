@@ -46,4 +46,23 @@ const DashboardModel = {
       return null;
     }
   },
+  /**
+   * Fetches how much area of a given land-use class exists in each district
+   * from the /api/v1/class-breakdown/:className endpoint.
+   */
+  fetchClassBreakdown: async function (className) {
+    try {
+      const response = await fetch(
+        `${this.apiBaseUrl}/class-breakdown/${encodeURIComponent(className)}`,
+      );
+      if (!response.ok)
+        throw new Error(`Network problem detected. Status: ${response.status}`);
+
+      const jsonResponse = await response.json();
+      return jsonResponse; // Returns {status, class_name, breakdown}
+    } catch (error) {
+      console.error("Model failed to retrieve class breakdown:", error);
+      return null;
+    }
+  },
 };

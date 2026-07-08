@@ -5,6 +5,7 @@ let olMap;
 let activeWmsOverlay; // Tracks the current active MapServer WMS layer
 let statsChart;
 let changeChart; // Tracks the land-use change (2016-2020) bar chart instance
+let dzongkhagLayer; // Tracks the clickable dzongkhag boundary layer, needed for choropleth recoloring
 
 document.addEventListener("DOMContentLoaded", async function () {
   initSpatialMap();
@@ -45,6 +46,152 @@ function initSpatialMap() {
     .addEventListener("change", function (event) {
       plainBasemap.setVisible(event.target.checked);
     });
+
+  // 4. Load dzongkhag boundaries as a clickable GeoJSON vector layer
+  const dzongkhagSource = new ol.source.Vector({
+    url: "http://127.0.0.1:5000/api/v1/geojson/dzongkhag",
+    format: new ol.format.GeoJSON(),
+  });
+
+  dzongkhagLayer = new ol.layer.Vector({
+    source: dzongkhagSource,
+    style: function (feature) {
+      return new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#1d88e5", width: 1.5 }),
+        fill: new ol.style.Fill({ color: "rgba(29, 136, 229, 0.08)" }),
+        text: new ol.style.Text({
+          text: feature.get("dzongkhag"),
+          font: "bold 11px sans-serif",
+          fill: new ol.style.Fill({ color: "#212529" }),
+          stroke: new ol.style.Stroke({ color: "#ffffff", width: 3 }),
+          overflow: true,
+        }),
+      });
+    },
+  });
+  olMap.addLayer(dzongkhagLayer);
+
+  // 5. Enable click-to-select on dzongkhag features
+  const dzongkhagSelect = new ol.interaction.Select({
+    layers: [dzongkhagLayer],
+    style: function (feature) {
+      return new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#c0392b", width: 3 }),
+        fill: new ol.style.Fill({ color: "rgba(192, 57, 43, 0.15)" }),
+        text: new ol.style.Text({
+          text: feature.get("dzongkhag"),
+          font: "bold 11px sans-serif",
+          fill: new ol.style.Fill({ color: "#212529" }),
+          stroke: new ol.style.Stroke({ color: "#ffffff", width: 3 }),
+          overflow: true,
+        }),
+      });
+    },
+  });
+  olMap.addInteraction(dzongkhagSelect);
+
+  dzongkhagSelect.on("select", async function (event) {
+    if (event.selected.length === 1) {
+      const clickedDistrict = event.selected[0].get("dzongkhag");
+      console.log(
+        `[Controller] Map click selected district: ${clickedDistrict}`,
+      );
+
+      // Sync the dropdown to match what was clicked
+      document.getElementById("data-filter").value = clickedDistrict;
+
+      // Refresh both charts using the clicked district
+      await triggerStatisticsRefresh(clickedDistrict);
+      await triggerChangeRefresh(clickedDistrict);
+    } else if (event.selected.length === 0) {
+      // Clicked empty space - deselected, revert to National view
+      document.getElementById("data-filter").value = "National";
+      await triggerStatisticsRefresh("National");
+      await triggerChangeRefresh("National");
+    }
+  });
+}
+
+/**
+ * Lightens a hex color based on intensity (0 = near-white, 1 = full color).
+ * Used so each land-use class's choropleth shading matches its own pie-chart color.
+ */
+function lightenColor(hex, intensity) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+
+  const blend = (channel) => Math.round(255 - (255 - channel) * intensity);
+
+  return `rgb(${blend(r)}, ${blend(g)}, ${blend(b)})`;
+}
+
+/**
+ * Recolors the dzongkhag map layer based on how much of a given land-use
+ * class each district contains — lighter color = less area, darker = more.
+ */
+async function showChoropleth(className) {
+  const responseData = await DashboardModel.fetchClassBreakdown(className);
+  if (!responseData || !responseData.breakdown) return;
+
+  const breakdown = responseData.breakdown;
+  const values = Object.values(breakdown);
+  const maxValue = Math.max(...values);
+
+  // Reconciles district-name spelling differences between the map layer
+  // and the land-use data, same mapping used on the backend but in reverse
+  // (map spelling -> data spelling), so we can look up each feature's value.
+  const districtNameMap = {
+    Mongar: "Monggar",
+    "Samdrup Jongkhar": "Samdrupjongkhar",
+    "Tashi Yangtse": "Trashiyangtse",
+    Tashigang: "Trashigang",
+    "Wangdue Phodrang": "Wangduephodrang",
+  };
+
+  dzongkhagLayer.setStyle(function (feature) {
+    const mapName = feature.get("dzongkhag");
+    const dataName = districtNameMap[mapName] || mapName;
+    const value = breakdown[dataName] || 0;
+    const intensity = maxValue > 0 ? value / maxValue : 0;
+
+    // Use this class's own pie-chart color, lightened based on intensity
+    const classColors = statsChart.data.datasets[0].backgroundColor;
+    const classIndex = statsChart.data.labels.indexOf(className);
+    const baseColor = classColors[classIndex] || "#228b22";
+    const fillColor = lightenColor(baseColor, Math.max(intensity, 0.15));
+
+    return new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: "#1d88e5", width: 1.5 }),
+      fill: new ol.style.Fill({ color: fillColor }),
+      text: new ol.style.Text({
+        text: mapName,
+        font: "bold 11px sans-serif",
+        fill: new ol.style.Fill({ color: "#212529" }),
+        stroke: new ol.style.Stroke({ color: "#ffffff", width: 3 }),
+        overflow: true,
+      }),
+    });
+  });
+}
+
+/**
+ * Restores the dzongkhag map layer's default (non-choropleth) styling.
+ */
+function resetChoropleth() {
+  dzongkhagLayer.setStyle(function (feature) {
+    return new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: "#1d88e5", width: 1.5 }),
+      fill: new ol.style.Fill({ color: "rgba(29, 136, 229, 0.08)" }),
+      text: new ol.style.Text({
+        text: feature.get("dzongkhag"),
+        font: "bold 11px sans-serif",
+        fill: new ol.style.Fill({ color: "#212529" }),
+        stroke: new ol.style.Stroke({ color: "#ffffff", width: 3 }),
+        overflow: true,
+      }),
+    });
+  });
 }
 
 function initDataCharts() {
@@ -79,6 +226,15 @@ function initDataCharts() {
     },
     options: {
       responsive: true,
+      onHover: function (event, activeElements) {
+        if (activeElements.length > 0) {
+          const index = activeElements[0].index;
+          const className = statsChart.data.labels[index];
+          showChoropleth(className);
+        } else {
+          resetChoropleth();
+        }
+      },
       plugins: {
         legend: {
           position: "bottom",
@@ -97,6 +253,12 @@ function initDataCharts() {
       },
     },
   });
+
+  document
+    .getElementById("dashboardChart")
+    .addEventListener("mouseleave", function () {
+      resetChoropleth();
+    });
 }
 
 /**
