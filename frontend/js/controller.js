@@ -1,5 +1,6 @@
 /**
  * MVC CONTROLLER COMPONENT
+ * global variables
  */
 let olMap;
 let activeWmsOverlay; // Tracks the current active MapServer WMS layer
