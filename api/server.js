@@ -140,6 +140,36 @@ app.get("/api/v1/geojson/dzongkhag", async (req, res) => {
 });
 
 /**
+ * GEOJSON ENDPOINT: Serves gewog (sub-district) boundaries as GeoJSON,
+ * same pattern as the dzongkhag endpoint, for a labeled vector layer.
+ */
+app.get("/api/v1/geojson/gewog", async (req, res) => {
+  try {
+    const queryText = `
+      SELECT jsonb_build_object(
+        'type', 'FeatureCollection',
+        'features', jsonb_agg(
+          jsonb_build_object(
+            'type', 'Feature',
+            'geometry', ST_AsGeoJSON(geom)::jsonb,
+            'properties', jsonb_build_object('gewog', name_eng)
+          )
+        )
+      ) AS geojson
+      FROM bhutan.gewog;
+    `;
+    const dbResult = await pool.query(queryText);
+    res.json(dbResult.rows[0].geojson);
+  } catch (error) {
+    console.error("💥 Gewog GeoJSON Export Error:", error.message);
+    res.status(500).json({
+      status: "error",
+      error: "Failed to export gewog boundaries",
+    });
+  }
+});
+
+/**
  * CHOROPLETH DATA ENDPOINT
  * Returns one land-use class's area broken down by every district —
  * used to color the dzongkhag map based on a selected class.

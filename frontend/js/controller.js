@@ -7,6 +7,7 @@ let activeWmsOverlay; // Tracks the current active MapServer WMS layer
 let statsChart;
 let changeChart; // Tracks the land-use change (2016-2020) bar chart instance
 let dzongkhagLayer; // Tracks the clickable dzongkhag boundary layer, needed for choropleth recoloring
+let gewogLayer; // Tracks the labeled gewog boundary layer
 
 document.addEventListener("DOMContentLoaded", async function () {
   initSpatialMap();
@@ -113,6 +114,31 @@ function initSpatialMap() {
       await triggerInsightsRefresh("National"); // <-- add this
     }
   });
+
+  // 6. Load gewog boundaries as a labeled GeoJSON vector layer (hidden by default)
+  const gewogSource = new ol.source.Vector({
+    url: "http://127.0.0.1:5000/api/v1/geojson/gewog",
+    format: new ol.format.GeoJSON(),
+  });
+
+  gewogLayer = new ol.layer.Vector({
+    source: gewogSource,
+    visible: false, // only shown when "Gewog Boundaries" is picked from the layer dropdown
+    style: function (feature) {
+      return new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#8e44ad", width: 1 }),
+        fill: new ol.style.Fill({ color: "rgba(142, 68, 173, 0.05)" }),
+        text: new ol.style.Text({
+          text: feature.get("gewog"),
+          font: "9px sans-serif",
+          fill: new ol.style.Fill({ color: "#212529" }),
+          stroke: new ol.style.Stroke({ color: "#ffffff", width: 2 }),
+          overflow: false, // gewogs are small, so don't force labels wider than the shape
+        }),
+      });
+    },
+  });
+  olMap.addLayer(gewogLayer);
 }
 
 /**
@@ -421,6 +447,9 @@ async function triggerInsightsRefresh(regionName) {
  */
 function updateMapLayerOverlay(layerName) {
   console.log(`[Controller] Initializing layer request for: ${layerName}`);
+
+  // Toggle the gewog vector layer's visibility based on dropdown selection
+  gewogLayer.setVisible(layerName === "gewog");
 
   if (activeWmsOverlay) {
     olMap.removeLayer(activeWmsOverlay);
