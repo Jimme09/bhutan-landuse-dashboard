@@ -186,6 +186,92 @@ app.get("/api/v1/class-breakdown/:className", async (req, res) => {
 });
 
 /**
+ * AI DISTRICT OVERVIEW ENDPOINT
+ * Sends a district's land-use statistics to Groq's LLM API and returns
+ * a natural-language summary of the district's land-use profile.
+ */
+app.get("/api/v1/insights/:regionName", async (req, res) => {
+  const regionName = resolveDistrictName(req.params.regionName);
+  console.log(`[API Server] AI insights request for: ${regionName}`);
+
+  try {
+    // 1. Gather the same statistics your pie chart already uses
+    const statsQuery = `
+      SELECT class_name, SUM(area_sqkm) as total_area
+      FROM bhutan.landuse_2020
+      WHERE LOWER(dzongkhag) = LOWER($1)
+      GROUP BY class_name
+      ORDER BY total_area DESC;
+    `;
+    const statsResult = await pool.query(statsQuery, [regionName]);
+
+    if (statsResult.rows.length === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: `No statistics found for region: ${regionName}`,
+      });
+    }
+
+    const statsSummary = statsResult.rows
+      .map(
+        (row) =>
+          `${row.class_name}: ${parseFloat(row.total_area).toFixed(2)} km²`,
+      )
+      .join(", ");
+
+    // 2. Send those stats to Groq's LLM API as context, asking for a short summary
+    const groqResponse = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-oss-20b",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a geospatial analyst. Given land-use area statistics for a district in Bhutan, write a concise 2-3 sentence summary describing its dominant land-use characteristics. Be factual and avoid speculation.",
+            },
+            {
+              role: "user",
+              content: `District: ${regionName}. Land-use breakdown: ${statsSummary}`,
+            },
+          ],
+          max_tokens: 350,
+        }),
+      },
+    );
+
+    const groqData = await groqResponse.json();
+
+    if (!groqResponse.ok) {
+      console.error("💥 Groq API Error:", groqData);
+      return res.status(502).json({
+        status: "error",
+        error: "AI insight generation failed",
+      });
+    }
+
+    const summary = groqData.choices[0].message.content;
+
+    res.json({
+      status: "success",
+      region: regionName,
+      summary: summary,
+    });
+  } catch (error) {
+    console.error("💥 AI Insights Error:", error.message);
+    res
+      .status(500)
+      .json({ status: "error", error: "Internal Server Exception" });
+  }
+});
+
+/**
  * TEMPORAL CHANGE-DETECTION ENDPOINT
  * Computes a land-use transition matrix between 2016 and 2020 for a given district
  */

@@ -26,6 +26,7 @@
         <div class="control-box">
           <label for="layer-selector">Active Map Layer</label>
           <select id="layer-selector">
+            <option value="None" selected>None</option>
             <option value="gewog">Gewog Boundaries</option>
             <option value="landuse_2020">Land Use Land Cover 2020</option>
           </select>
@@ -67,10 +68,23 @@
         </div>
       </main>
 
+      <div class="ai-insights-panel">
+        <h3>
+          AI District Overview
+          <span class="data-year-tag">Based on 2020 LULC data</span>
+        </h3>
+        <p id="ai-insights-text">
+          Select a district to see an AI-generated overview.
+        </p>
+      </div>
+
       <!-- Stats panel below the map: charts side-by-side -->
       <section class="stats-panel">
         <div class="chart-box">
-          <h3>Area Distribution Metrics</h3>
+          <h3>
+            Area Distribution Metrics
+            <span class="data-year-tag">2020 LULC</span>
+          </h3>
           <canvas id="dashboardChart"></canvas>
         </div>
 

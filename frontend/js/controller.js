@@ -104,11 +104,13 @@ function initSpatialMap() {
       // Refresh both charts using the clicked district
       await triggerStatisticsRefresh(clickedDistrict);
       await triggerChangeRefresh(clickedDistrict);
+      await triggerInsightsRefresh(clickedDistrict); // <-- add this
     } else if (event.selected.length === 0) {
       // Clicked empty space - deselected, revert to National view
       document.getElementById("data-filter").value = "National";
       await triggerStatisticsRefresh("National");
       await triggerChangeRefresh("National");
+      await triggerInsightsRefresh("National"); // <-- add this
     }
   });
 }
@@ -227,6 +229,7 @@ function initDataCharts() {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       onHover: function (event, activeElements) {
         if (activeElements.length > 0) {
           const index = activeElements[0].index;
@@ -238,7 +241,7 @@ function initDataCharts() {
       },
       plugins: {
         legend: {
-          position: "bottom",
+          position: "right",
           labels: { boxWidth: 10, font: { size: 11 } },
         },
         tooltip: {
@@ -391,6 +394,29 @@ async function triggerChangeRefresh(regionName) {
 }
 
 /**
+ * Worker Function: Queries the AI insights endpoint and displays the
+ * generated summary in the AI overview panel.
+ */
+async function triggerInsightsRefresh(regionName) {
+  const insightsText = document.getElementById("ai-insights-text");
+  insightsText.textContent = "Generating AI overview...";
+
+  try {
+    console.log(`[Controller] Querying Model for AI insights: ${regionName}`);
+    const responseData = await DashboardModel.fetchDistrictInsights(regionName);
+
+    if (responseData && responseData.summary) {
+      insightsText.textContent = responseData.summary;
+    } else {
+      insightsText.textContent = "AI overview unavailable for this region.";
+    }
+  } catch (error) {
+    console.error("[Controller] Failed to load AI insights:", error);
+    insightsText.textContent = "AI overview unavailable for this region.";
+  }
+}
+
+/**
  * WORKER FUNCTION: Swaps MapServer WMS layers on the OpenLayers map canvas
  */
 function updateMapLayerOverlay(layerName) {
@@ -490,6 +516,7 @@ function bindUserActionInterceptors() {
 
       await triggerStatisticsRefresh(pickedRegion);
       await triggerChangeRefresh(pickedRegion); // <-- NEW: also refresh change chart
+      await triggerInsightsRefresh(pickedRegion);
     });
 
   // Listener B: Active Map Layer Dropdown (Updates Map Canvas)

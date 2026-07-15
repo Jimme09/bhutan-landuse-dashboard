@@ -65,4 +65,24 @@ const DashboardModel = {
       return null;
     }
   },
+
+  /**
+   * Fetches an AI-generated summary of a district's land-use profile
+   * from the /api/v1/insights/:regionName endpoint.
+   */
+  fetchDistrictInsights: async function (regionName) {
+    try {
+      const response = await fetch(
+        `${this.apiBaseUrl}/insights/${encodeURIComponent(regionName)}`,
+      );
+      if (!response.ok)
+        throw new Error(`Network problem detected. Status: ${response.status}`);
+
+      const jsonResponse = await response.json();
+      return jsonResponse; // Returns {status, region, summary}
+    } catch (error) {
+      console.error("Model failed to retrieve AI district insights:", error);
+      return null;
+    }
+  },
 };
