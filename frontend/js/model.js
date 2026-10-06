@@ -6,7 +6,11 @@ const DashboardModel = {
   apiBaseUrl: "http://127.0.0.1:5000/api/v1",
 
   // MapServer Configuration pointing to your Apache CGI installation gateway
-  mapServerWmsEndpoint: "http://localhost/cgi-bin/mapserv.exe?map=bhutan",
+  // (the MAP=bhutan parameter is added by the controller's WMS source)
+  mapServerWmsEndpoint: "http://localhost/cgi-bin/mapserv.exe",
+
+  // The land-use data is static, so each class breakdown only needs fetching once
+  classBreakdownCache: {},
 
   /**
    * Fetches data properties asynchronously from the local Node application context
@@ -51,6 +55,10 @@ const DashboardModel = {
    * from the /api/v1/class-breakdown/:className endpoint.
    */
   fetchClassBreakdown: async function (className) {
+    if (this.classBreakdownCache[className]) {
+      return this.classBreakdownCache[className];
+    }
+
     try {
       const response = await fetch(
         `${this.apiBaseUrl}/class-breakdown/${encodeURIComponent(className)}`,
@@ -59,6 +67,7 @@ const DashboardModel = {
         throw new Error(`Network problem detected. Status: ${response.status}`);
 
       const jsonResponse = await response.json();
+      this.classBreakdownCache[className] = jsonResponse;
       return jsonResponse; // Returns {status, class_name, breakdown}
     } catch (error) {
       console.error("Model failed to retrieve class breakdown:", error);

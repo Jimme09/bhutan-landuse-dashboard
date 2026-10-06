@@ -8,30 +8,76 @@ let statsChart;
 let changeChart; // Tracks the land-use change (2016-2020) bar chart instance
 let dzongkhagLayer; // Tracks the clickable dzongkhag boundary layer, needed for choropleth recoloring
 let gewogLayer; // Tracks the labeled gewog boundary layer
+let latestRegionRequest = 0; // Increments per region change so slow, outdated responses are ignored
+let activeChoroplethClass = null; // Class currently shaded on the map, so repeated hovers don't refetch
+
+// Colors matched to the bhutan.map class specifications, keyed by class name
+// so a district missing some classes doesn't shift every color after it.
+const CLASS_COLORS = {
+  "Agriculture Land": "#ffd700", // COLOR 255 215 0
+  "Alpine Scrubs": "#b4e6b4", // COLOR 180 230 180
+  "Built up": "#dc5050", // COLOR 220 80 80
+  Forests: "#228b22", // COLOR 34 139 34
+  Landslides: "#b4783c", // COLOR 180 120 60
+  Meadows: "#90ee90", // COLOR 144 238 144
+  Moraines: "#a9a9a9", // COLOR 169 169 169
+  "Non Built up": "#d2b48c", // COLOR 210 180 140
+  "Rocky Outcrops": "#808080", // COLOR 128 128 128
+  "Sandy Bank": "#f0e68c", // COLOR 240 230 140
+  Shrubs: "#6b8e23", // COLOR 107 142 35
+  "Snow and Glacier": "#f0f8ff", // COLOR 240 248 255
+  "Water Bodies": "#4682b4", // COLOR 70 130 180
+};
+const FALLBACK_CLASS_COLOR = "#999999";
+
+function colorForClass(className) {
+  return CLASS_COLORS[className] || FALLBACK_CLASS_COLOR;
+}
 
 document.addEventListener("DOMContentLoaded", async function () {
   initSpatialMap();
 
-  // 1. Initialize the chart instance with a blank state
+  // 1. Initialize the chart instances with a blank state
   initDataCharts();
   initChangeChart();
+  bindUserActionInterceptors();
 
   // 2. Automatically request National metrics on dashboard startup
-  await triggerStatisticsRefresh("National");
-  await triggerChangeRefresh("National");
-
-  bindUserActionInterceptors();
+  await refreshRegion("National");
 });
+
+/**
+ * Refreshes every panel (pie chart, change chart, AI overview) for one region.
+ * The three requests run in parallel; if the user picks another region before
+ * they finish, the outdated results are discarded.
+ */
+async function refreshRegion(regionName) {
+  const requestId = ++latestRegionRequest;
+  const isCurrent = () => requestId === latestRegionRequest;
+
+  await Promise.all([
+    triggerStatisticsRefresh(regionName, isCurrent),
+    triggerChangeRefresh(regionName, isCurrent),
+    triggerInsightsRefresh(regionName, isCurrent),
+  ]);
+}
+
+function setBackendStatus(isConnected) {
+  const statusEl = document.getElementById("backend-status");
+  statusEl.textContent = isConnected
+    ? "Live PostGIS connection active"
+    : "Cannot reach the API server — is `npm run server` running?";
+  statusEl.style.color = isConnected ? "#2e8b57" : "#c0392b";
+}
 
 function initSpatialMap() {
   const bhutanCoordinates = ol.proj.fromLonLat([90.4, 27.51]);
 
-  // 1. Define the plain basemap
+  // 1. Define the plain basemap (OpenStreetMap, desaturated via the
+  // .basemap-layer CSS rule so the data layers stand out)
   const plainBasemap = new ol.layer.Tile({
-    source: new ol.source.XYZ({
-      url: "https://{a-c}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-      attributions: "© CartoDB",
-    }),
+    source: new ol.source.OSM(),
+    className: "basemap-layer",
     visible: true,
   });
 
@@ -51,7 +97,7 @@ function initSpatialMap() {
 
   // 4. Load dzongkhag boundaries as a clickable GeoJSON vector layer
   const dzongkhagSource = new ol.source.Vector({
-    url: "http://127.0.0.1:5000/api/v1/geojson/dzongkhag",
+    url: `${DashboardModel.apiBaseUrl}/geojson/dzongkhag`,
     format: new ol.format.GeoJSON(),
   });
 
@@ -102,22 +148,17 @@ function initSpatialMap() {
       // Sync the dropdown to match what was clicked
       document.getElementById("data-filter").value = clickedDistrict;
 
-      // Refresh both charts using the clicked district
-      await triggerStatisticsRefresh(clickedDistrict);
-      await triggerChangeRefresh(clickedDistrict);
-      await triggerInsightsRefresh(clickedDistrict); // <-- add this
+      await refreshRegion(clickedDistrict);
     } else if (event.selected.length === 0) {
       // Clicked empty space - deselected, revert to National view
       document.getElementById("data-filter").value = "National";
-      await triggerStatisticsRefresh("National");
-      await triggerChangeRefresh("National");
-      await triggerInsightsRefresh("National"); // <-- add this
+      await refreshRegion("National");
     }
   });
 
   // 6. Load gewog boundaries as a labeled GeoJSON vector layer (hidden by default)
   const gewogSource = new ol.source.Vector({
-    url: "http://127.0.0.1:5000/api/v1/geojson/gewog",
+    url: `${DashboardModel.apiBaseUrl}/geojson/gewog`,
     format: new ol.format.GeoJSON(),
   });
 
@@ -160,34 +201,27 @@ function lightenColor(hex, intensity) {
  * class each district contains — lighter color = less area, darker = more.
  */
 async function showChoropleth(className) {
+  if (className === activeChoroplethClass) return;
+  activeChoroplethClass = className;
+
   const responseData = await DashboardModel.fetchClassBreakdown(className);
+  // The user may have hovered another slice (or left the chart) while this loaded
+  if (activeChoroplethClass !== className) return;
   if (!responseData || !responseData.breakdown) return;
 
+  // The backend returns breakdown keys in the boundary layer's spelling,
+  // so each map feature can look up its value directly by name.
   const breakdown = responseData.breakdown;
   const values = Object.values(breakdown);
   const maxValue = Math.max(...values);
-
-  // Reconciles district-name spelling differences between the map layer
-  // and the land-use data, same mapping used on the backend but in reverse
-  // (map spelling -> data spelling), so we can look up each feature's value.
-  const districtNameMap = {
-    Mongar: "Monggar",
-    "Samdrup Jongkhar": "Samdrupjongkhar",
-    "Tashi Yangtse": "Trashiyangtse",
-    Tashigang: "Trashigang",
-    "Wangdue Phodrang": "Wangduephodrang",
-  };
+  const baseColor = colorForClass(className);
 
   dzongkhagLayer.setStyle(function (feature) {
     const mapName = feature.get("dzongkhag");
-    const dataName = districtNameMap[mapName] || mapName;
-    const value = breakdown[dataName] || 0;
+    const value = breakdown[mapName] || 0;
     const intensity = maxValue > 0 ? value / maxValue : 0;
 
     // Use this class's own pie-chart color, lightened based on intensity
-    const classColors = statsChart.data.datasets[0].backgroundColor;
-    const classIndex = statsChart.data.labels.indexOf(className);
-    const baseColor = classColors[classIndex] || "#228b22";
     const fillColor = lightenColor(baseColor, Math.max(intensity, 0.15));
 
     return new ol.style.Style({
@@ -208,6 +242,9 @@ async function showChoropleth(className) {
  * Restores the dzongkhag map layer's default (non-choropleth) styling.
  */
 function resetChoropleth() {
+  if (activeChoroplethClass === null) return;
+  activeChoroplethClass = null;
+
   dzongkhagLayer.setStyle(function (feature) {
     return new ol.style.Style({
       stroke: new ol.style.Stroke({ color: "#1d88e5", width: 1.5 }),
@@ -233,22 +270,7 @@ function initDataCharts() {
       datasets: [
         {
           data: [], // Populated dynamically by model response values
-          // Color hex palette matched exactly to your bhutan.map class specifications
-          backgroundColor: [
-            "#ffd700", // Agriculture Land -> COLOR 255 215 0
-            "#b4e6b4", // Alpine Scrubs -> COLOR 180 230 180
-            "#dc5050", // Built up -> COLOR 220 80 80
-            "#228b22", // Forests -> COLOR 34 139 34
-            "#b4783c", // Landslides -> COLOR 180 120 60
-            "#90ee90", // Meadows -> COLOR 144 238 144
-            "#a9a9a9", // Moraines -> COLOR 169 169 169
-            "#d2b48c", // Non Built up -> COLOR 210 180 140
-            "#808080", // Rocky Outcrops -> COLOR 128 128 128
-            "#f0e68c", // Sandy Bank -> COLOR 240 230 140
-            "#6b8e23", // Shrubs -> COLOR 107 142 35
-            "#f0f8ff", // Snow and Glacier -> COLOR 240 248 255
-            "#4682b4", // Water Bodies -> COLOR 70 130 180
-          ],
+          backgroundColor: [], // Set per class from CLASS_COLORS on each refresh
           borderWidth: 1,
         },
       ],
@@ -328,14 +350,19 @@ function initChangeChart() {
 /**
  * Worker Function: Queries your local Node.js API server for chart metrics
  */
-async function triggerStatisticsRefresh(regionName) {
+async function triggerStatisticsRefresh(regionName, isCurrent = () => true) {
   try {
     console.log(`[Controller] Querying Model for live data: ${regionName}`);
     const responseData = await DashboardModel.fetchRegionStats(regionName);
+    if (!isCurrent()) return;
+
+    setBackendStatus(responseData !== null);
 
     if (responseData && responseData.categories && responseData.values) {
       statsChart.data.labels = responseData.categories;
       statsChart.data.datasets[0].data = responseData.values;
+      statsChart.data.datasets[0].backgroundColor =
+        responseData.categories.map(colorForClass);
       statsChart.update();
       console.log(
         `[Controller] Chart successfully populated with ${responseData.categories.length} spatial classes.`,
@@ -353,10 +380,11 @@ async function triggerStatisticsRefresh(regionName) {
  * Worker Function: Queries the change-detection API and renders both
  * the net-change bar chart and the full transition table.
  */
-async function triggerChangeRefresh(regionName) {
+async function triggerChangeRefresh(regionName, isCurrent = () => true) {
   try {
     console.log(`[Controller] Querying Model for change data: ${regionName}`);
     const responseData = await DashboardModel.fetchRegionChange(regionName);
+    if (!isCurrent()) return;
 
     if (responseData && responseData.transitions) {
       const transitions = responseData.transitions;
@@ -399,11 +427,17 @@ async function triggerChangeRefresh(regionName) {
         .filter((row) => row.class_2016 !== row.class_2020)
         .forEach((row) => {
           const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${row.class_2016}</td>
-            <td>${row.class_2020}</td>
-            <td style="text-align:right;">${row.area_sqkm}</td>
-          `;
+          const cells = [
+            row.class_2016,
+            row.class_2020,
+            parseFloat(row.area_sqkm).toFixed(2),
+          ];
+          cells.forEach((text, i) => {
+            const td = document.createElement("td");
+            td.textContent = text;
+            if (i === 2) td.style.textAlign = "right";
+            tr.appendChild(td);
+          });
           tableBody.appendChild(tr);
         });
 
@@ -423,13 +457,14 @@ async function triggerChangeRefresh(regionName) {
  * Worker Function: Queries the AI insights endpoint and displays the
  * generated summary in the AI overview panel.
  */
-async function triggerInsightsRefresh(regionName) {
+async function triggerInsightsRefresh(regionName, isCurrent = () => true) {
   const insightsText = document.getElementById("ai-insights-text");
   insightsText.textContent = "Generating AI overview...";
 
   try {
     console.log(`[Controller] Querying Model for AI insights: ${regionName}`);
     const responseData = await DashboardModel.fetchDistrictInsights(regionName);
+    if (!isCurrent()) return;
 
     if (responseData && responseData.summary) {
       insightsText.textContent = responseData.summary;
@@ -438,7 +473,9 @@ async function triggerInsightsRefresh(regionName) {
     }
   } catch (error) {
     console.error("[Controller] Failed to load AI insights:", error);
-    insightsText.textContent = "AI overview unavailable for this region.";
+    if (isCurrent()) {
+      insightsText.textContent = "AI overview unavailable for this region.";
+    }
   }
 }
 
@@ -456,11 +493,12 @@ function updateMapLayerOverlay(layerName) {
     activeWmsOverlay = null;
   }
 
-  if (!layerName || layerName === "None") return;
+  // Gewogs are drawn by the vector layer above, so they need no WMS overlay
+  if (!layerName || layerName === "None" || layerName === "gewog") return;
 
   // 1. Define our spatial parameters manually
   const wmsSource = new ol.source.TileWMS({
-    url: "http://localhost/cgi-bin/mapserv.exe",
+    url: DashboardModel.mapServerWmsEndpoint,
     params: {
       MAP: "bhutan",
       LAYERS: layerName,
@@ -481,10 +519,9 @@ function updateMapLayerOverlay(layerName) {
     }),
   });
 
-  // 2. THE DIAGNOSTIC SNIPPER: Intercept tile delivery and print network statuses to console
+  // 2. Diagnostic tile loader: surfaces MapServer errors in the console
+  // instead of silently showing blank tiles
   wmsSource.setTileLoadFunction(function (tile, src) {
-    console.log(`[MapServer Link Generated]: ${src}`);
-
     const xhr = new XMLHttpRequest();
     xhr.open("GET", src);
     xhr.responseType = "blob";
@@ -494,6 +531,7 @@ function updateMapLayerOverlay(layerName) {
         console.error(
           `[Tile Error] HTTP Status ${xhr.status} returned from MapServer.`,
         );
+        tile.setState(ol.TileState.ERROR);
       } else {
         // If it's text (like an XML error string) instead of an actual image blob
         if (
@@ -507,9 +545,13 @@ function updateMapLayerOverlay(layerName) {
             console.error("======================================");
           };
           reader.readAsText(xhr.response);
+          tile.setState(ol.TileState.ERROR);
         } else {
-          // It's a valid transparent image tile delivery!
-          tile.getImage().src = URL.createObjectURL(xhr.response);
+          // It's a valid image tile; free the blob URL once the image has decoded
+          const image = tile.getImage();
+          const objectUrl = URL.createObjectURL(xhr.response);
+          image.onload = image.onerror = () => URL.revokeObjectURL(objectUrl);
+          image.src = objectUrl;
         }
       }
     };
@@ -518,6 +560,7 @@ function updateMapLayerOverlay(layerName) {
       console.error(
         "[Network Error] OpenLayers could not establish connection to mapserv.exe.",
       );
+      tile.setState(ol.TileState.ERROR);
     };
 
     xhr.send();
@@ -533,24 +576,22 @@ function updateMapLayerOverlay(layerName) {
 }
 
 /**
- * MODIFIED INTERCEPTOR: Includes the missing layer dropdown change event listener
+ * Binds the dropdowns and the transition-table toggle to their handlers
  */
 function bindUserActionInterceptors() {
-  // Listener A: District Filter Dropdown (Updates Chart)
+  // Listener A: District Filter Dropdown (Updates all panels)
   document
     .getElementById("data-filter")
     .addEventListener("change", async function (event) {
       const pickedRegion = event.target.value;
       console.log("Controller caught filter action for: " + pickedRegion);
 
-      await triggerStatisticsRefresh(pickedRegion);
-      await triggerChangeRefresh(pickedRegion); // <-- NEW: also refresh change chart
-      await triggerInsightsRefresh(pickedRegion);
+      await refreshRegion(pickedRegion);
     });
 
   // Listener B: Active Map Layer Dropdown (Updates Map Canvas)
   document
-    .getElementById("layer-selector") // Targets the ID inside index.html exactly
+    .getElementById("layer-selector")
     .addEventListener("change", function (event) {
       const selectedLayer = event.target.value;
       console.log("[Controller] Dropdown selected layer: " + selectedLayer);
@@ -558,7 +599,7 @@ function bindUserActionInterceptors() {
       updateMapLayerOverlay(selectedLayer);
     });
 
-  // Listener C: Toggle button for showing/hiding the full transition table  <-- NEW BLOCK
+  // Listener C: Toggle button for showing/hiding the full transition table
   document
     .getElementById("toggle-transition-table")
     .addEventListener("click", function () {

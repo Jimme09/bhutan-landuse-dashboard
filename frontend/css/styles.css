@@ -89,6 +89,11 @@ html {
     position: relative;
 }
 
+/* Desaturate the OpenStreetMap basemap so boundaries and choropleth colors stand out */
+.map-container .basemap-layer {
+    filter: grayscale(1) contrast(0.9) brightness(1.05);
+}
+
 .map-container .control-box {
     position: absolute;
     top: 12px;

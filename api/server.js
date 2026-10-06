@@ -4,7 +4,7 @@ const cors = require("cors");
 const { Pool } = require("pg"); // Manages connections to your PostgreSQL/PostGIS database
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
@@ -46,6 +46,24 @@ const districtNameMap = {
 function resolveDistrictName(name) {
   return districtNameMap[name] || name;
 }
+
+// Reverse lookup (data spelling -> boundary spelling), so responses keyed by
+// district can be matched directly against the map's features.
+const boundaryNameMap = Object.fromEntries(
+  Object.entries(districtNameMap).map(([boundary, data]) => [data, boundary]),
+);
+
+function toBoundaryName(name) {
+  return boundaryNameMap[name] || name;
+}
+
+function isNational(regionName) {
+  return regionName === "National" || regionName === "All Districts (National)";
+}
+
+// AI summaries are generated from static data, so cache them per region to
+// avoid repeated (rate-limited) calls to the Groq API.
+const insightsCache = new Map();
 app.get("/api/v1/statistics/:regionName", async (req, res) => {
   const regionName = resolveDistrictName(req.params.regionName);
   console.log(`[API Server] Request received for region: ${regionName}`);
@@ -55,10 +73,7 @@ app.get("/api/v1/statistics/:regionName", async (req, res) => {
     let queryParams = [];
 
     // 2. Formulate the dynamic SQL block depending on the dropdown selection
-    if (
-      regionName === "National" ||
-      regionName === "All Districts (National)"
-    ) {
+    if (isNational(regionName)) {
       queryText = `
                 SELECT class_name, SUM(area_sqkm) as total_area
                 FROM bhutan.landuse_2020
@@ -107,8 +122,6 @@ app.get("/api/v1/statistics/:regionName", async (req, res) => {
       .json({ status: "error", error: "Internal Server Database Exception" });
   }
 });
-// <-- PASTE THE NEW /api/v1/change/:regionName ENDPOINT HERE -->
-
 /**
  * GEOJSON ENDPOINT: Serves dzongkhag boundaries as GeoJSON for the
  * interactive (clickable) map layer, instead of static WMS tiles.
@@ -121,7 +134,7 @@ app.get("/api/v1/geojson/dzongkhag", async (req, res) => {
         'features', jsonb_agg(
           jsonb_build_object(
             'type', 'Feature',
-            'geometry', ST_AsGeoJSON(geom)::jsonb,
+            'geometry', ST_AsGeoJSON(geom, 6)::jsonb,
             'properties', jsonb_build_object('dzongkhag', dzongkhag)
           )
         )
@@ -151,7 +164,7 @@ app.get("/api/v1/geojson/gewog", async (req, res) => {
         'features', jsonb_agg(
           jsonb_build_object(
             'type', 'Feature',
-            'geometry', ST_AsGeoJSON(geom)::jsonb,
+            'geometry', ST_AsGeoJSON(geom, 6)::jsonb,
             'properties', jsonb_build_object('gewog', name_eng)
           )
         )
@@ -195,11 +208,11 @@ app.get("/api/v1/class-breakdown/:className", async (req, res) => {
       });
     }
 
-    // Build a simple {districtName: area} lookup, since that's what the
-    // frontend needs to match against map features by name.
+    // Build a simple {districtName: area} lookup, keyed by the boundary
+    // layer's spelling so the frontend can match map features by name.
     const breakdown = {};
     dbResult.rows.forEach((row) => {
-      breakdown[row.dzongkhag] = parseFloat(row.total_area);
+      breakdown[toBoundaryName(row.dzongkhag)] = parseFloat(row.total_area);
     });
 
     res.json({
@@ -224,16 +237,29 @@ app.get("/api/v1/insights/:regionName", async (req, res) => {
   const regionName = resolveDistrictName(req.params.regionName);
   console.log(`[API Server] AI insights request for: ${regionName}`);
 
+  const national = isNational(regionName);
+  const cacheKey = national ? "National" : regionName.toLowerCase();
+  if (insightsCache.has(cacheKey)) {
+    return res.json(insightsCache.get(cacheKey));
+  }
+
   try {
     // 1. Gather the same statistics your pie chart already uses
-    const statsQuery = `
+    const statsQuery = national
+      ? `
+      SELECT class_name, SUM(area_sqkm) as total_area
+      FROM bhutan.landuse_2020
+      GROUP BY class_name
+      ORDER BY total_area DESC;
+    `
+      : `
       SELECT class_name, SUM(area_sqkm) as total_area
       FROM bhutan.landuse_2020
       WHERE LOWER(dzongkhag) = LOWER($1)
       GROUP BY class_name
       ORDER BY total_area DESC;
     `;
-    const statsResult = await pool.query(statsQuery, [regionName]);
+    const statsResult = await pool.query(statsQuery, national ? [] : [regionName]);
 
     if (statsResult.rows.length === 0) {
       return res.status(404).json({
@@ -242,11 +268,18 @@ app.get("/api/v1/insights/:regionName", async (req, res) => {
       });
     }
 
+    // Include each class's share of the total, so the LLM doesn't have to
+    // do (and get wrong) the percentage arithmetic itself
+    const totalArea = statsResult.rows.reduce(
+      (sum, row) => sum + parseFloat(row.total_area),
+      0,
+    );
     const statsSummary = statsResult.rows
-      .map(
-        (row) =>
-          `${row.class_name}: ${parseFloat(row.total_area).toFixed(2)} km²`,
-      )
+      .map((row) => {
+        const area = parseFloat(row.total_area);
+        const share = ((area / totalArea) * 100).toFixed(1);
+        return `${row.class_name}: ${area.toFixed(2)} km² (${share}%)`;
+      })
       .join(", ");
 
     // 2. Send those stats to Groq's LLM API as context, asking for a short summary
@@ -264,14 +297,19 @@ app.get("/api/v1/insights/:regionName", async (req, res) => {
             {
               role: "system",
               content:
-                "You are a geospatial analyst. Given land-use area statistics for a district in Bhutan, write a concise 2-3 sentence summary describing its dominant land-use characteristics. Be factual and avoid speculation.",
+                "You are a geospatial analyst. Given land-use area statistics for a district in Bhutan (or for the whole country), write a concise 2-3 sentence summary describing its dominant land-use characteristics. Be factual and avoid speculation. Quote only the areas and percentages given; do not calculate new figures.",
             },
             {
               role: "user",
-              content: `District: ${regionName}. Land-use breakdown: ${statsSummary}`,
+              content: national
+                ? `Region: Bhutan (national, all districts). Land-use breakdown: ${statsSummary}`
+                : `District: ${regionName}. Land-use breakdown: ${statsSummary}`,
             },
           ],
-          max_tokens: 350,
+          // gpt-oss is a reasoning model: its hidden reasoning counts toward
+          // max_tokens, so keep reasoning light and leave room for the answer
+          reasoning_effort: "low",
+          max_tokens: 1000,
         }),
       },
     );
@@ -286,13 +324,26 @@ app.get("/api/v1/insights/:regionName", async (req, res) => {
       });
     }
 
-    const summary = groqData.choices[0].message.content;
+    const summary = (groqData.choices?.[0]?.message?.content || "").trim();
 
-    res.json({
+    if (!summary) {
+      console.error(
+        "💥 Groq returned an empty summary. finish_reason:",
+        groqData.choices?.[0]?.finish_reason,
+      );
+      return res.status(502).json({
+        status: "error",
+        error: "AI insight generation returned no text",
+      });
+    }
+
+    const payload = {
       status: "success",
       region: regionName,
       summary: summary,
-    });
+    };
+    insightsCache.set(cacheKey, payload);
+    res.json(payload);
   } catch (error) {
     console.error("💥 AI Insights Error:", error.message);
     res
@@ -315,10 +366,7 @@ app.get("/api/v1/change/:regionName", async (req, res) => {
     let queryText = "";
     let queryParams = [];
 
-    if (
-      regionName === "National" ||
-      regionName === "All Districts (National)"
-    ) {
+    if (isNational(regionName)) {
       queryText = `
         SELECT class_2016, class_2020, area_sqkm
         FROM bhutan.national_transitions

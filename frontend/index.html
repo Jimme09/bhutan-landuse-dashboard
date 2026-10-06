@@ -9,7 +9,7 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.15.1/css/ol.css"
     />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
     <link rel="stylesheet" href="./css/styles.css" />
   </head>
   <body>
@@ -50,8 +50,9 @@
             <option value="Samtse">Samtse</option>
             <option value="Sarpang">Sarpang</option>
             <option value="Thimphu">Thimphu</option>
-            <option value="Trashigang">Trashigang</option>
-            <option value="Trashiyangtse">Trashiyangtse</option>
+            <!-- Values match the boundary layer's spelling so map clicks can select them -->
+            <option value="Tashigang">Trashigang</option>
+            <option value="Tashi Yangtse">Trashiyangtse</option>
             <option value="Trongsa">Trongsa</option>
             <option value="Tsirang">Tsirang</option>
             <option value="Wangdue Phodrang">Wangdue Phodrang</option>
@@ -128,7 +129,7 @@
         <p>
           Status:
           <span id="backend-status" class="status-placeholder"
-            >Live PostGIS Connection Active</span
+            >Connecting to PostGIS…</span
           >
         </p>
       </footer>
