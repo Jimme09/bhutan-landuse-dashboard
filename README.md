@@ -2,6 +2,10 @@
 
 An interactive PostGIS-backed dashboard for exploring land-use distribution, and land-use change between 2016 and 2020, across Bhutan's dzongkhags (districts), using the National Land Commission Secretariat's LULC 2016 and LULC 2020 datasets.
 
+**▶ Live demo: https://jimme09.github.io/bhutan-landuse-dashboard/**
+
+The live demo is a static snapshot. The same frontend reads pre-exported JSON files (see [Static demo](#static-demo)) instead of calling the API, so it runs on GitHub Pages without a server. Everything works except the MapServer LULC 2020 overlay, which needs the local setup.
+
 ## Overview
 
 Built with a Node/Express + PostGIS backend and an OpenLayers + Chart.js frontend, this dashboard lets users:
@@ -32,9 +36,13 @@ App/
 ├── frontend/
 │   ├── index.html
 │   ├── css/styles.css
+│   ├── data/             # static JSON snapshot used by the live demo
 │   └── js/
-│       ├── model.js      # data fetching
+│       ├── model.js      # data fetching (live API or static snapshot)
 │       └── controller.js # map/chart state, DOM events
+├── scripts/
+│   └── export-static-data.js # writes frontend/data from the running API
+├── index.html             # GitHub Pages entry, redirects to frontend/
 ├── .env.example           # required environment variables (copy to .env)
 └── package.json
 ```
@@ -94,6 +102,19 @@ Example — `GET /api/v1/statistics/Thimphu`:
   "values": [1234.56, 78.9, 45.2]
 }
 ```
+
+## Static demo
+
+When the frontend is served from anywhere other than `localhost`, `model.js` reads JSON files from `frontend/data/` instead of calling the API. To preview this mode locally, open `http://localhost:3000/?static=1`.
+
+To regenerate the snapshot (for example after changing the database or the AI prompt):
+
+```
+npm run server          # terminal 1
+npm run export-static   # terminal 2
+```
+
+This saves every response the dashboard can request: the boundaries, statistics and change data for each dropdown region, the breakdown for each class, and the AI summaries. Commit the updated `frontend/data/` folder to publish it.
 
 ## Notes on interpreting change
 

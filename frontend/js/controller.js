@@ -35,6 +35,7 @@ function colorForClass(className) {
 }
 
 document.addEventListener("DOMContentLoaded", async function () {
+  if (DashboardModel.isStaticMode) disableServerOnlyLayers();
   initSpatialMap();
 
   // 1. Initialize the chart instances with a blank state
@@ -64,10 +65,30 @@ async function refreshRegion(regionName) {
 
 function setBackendStatus(isConnected) {
   const statusEl = document.getElementById("backend-status");
-  statusEl.textContent = isConnected
-    ? "Live PostGIS connection active"
-    : "Cannot reach the API server — is `npm run server` running?";
+  if (DashboardModel.isStaticMode) {
+    statusEl.textContent = isConnected
+      ? "Static demo — data exported from PostGIS (run locally for the live API)"
+      : "Could not load the static data files";
+  } else {
+    statusEl.textContent = isConnected
+      ? "Live PostGIS connection active"
+      : "Cannot reach the API server — is `npm run server` running?";
+  }
   statusEl.style.color = isConnected ? "#2e8b57" : "#c0392b";
+}
+
+/**
+ * The LULC 2020 overlay is rendered by a local MapServer, which isn't
+ * available in the static demo, so its dropdown option is disabled there.
+ */
+function disableServerOnlyLayers() {
+  const option = document.querySelector(
+    '#layer-selector option[value="landuse_2020"]',
+  );
+  if (option) {
+    option.disabled = true;
+    option.textContent += " (local version only)";
+  }
 }
 
 function initSpatialMap() {
@@ -97,7 +118,7 @@ function initSpatialMap() {
 
   // 4. Load dzongkhag boundaries as a clickable GeoJSON vector layer
   const dzongkhagSource = new ol.source.Vector({
-    url: `${DashboardModel.apiBaseUrl}/geojson/dzongkhag`,
+    url: DashboardModel.geojsonUrl("dzongkhag"),
     format: new ol.format.GeoJSON(),
   });
 
@@ -158,7 +179,7 @@ function initSpatialMap() {
 
   // 6. Load gewog boundaries as a labeled GeoJSON vector layer (hidden by default)
   const gewogSource = new ol.source.Vector({
-    url: `${DashboardModel.apiBaseUrl}/geojson/gewog`,
+    url: DashboardModel.geojsonUrl("gewog"),
     format: new ol.format.GeoJSON(),
   });
 

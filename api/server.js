@@ -57,6 +57,16 @@ function toBoundaryName(name) {
   return boundaryNameMap[name] || name;
 }
 
+// The 2016 layer (and the transition tables built from it) uses a third
+// spelling for some districts, e.g. "Yangtse" instead of "Trashiyangtse".
+const transitionNameMap = {
+  Trashiyangtse: "Yangtse",
+};
+
+function toTransitionName(name) {
+  return transitionNameMap[name] || name;
+}
+
 function isNational(regionName) {
   return regionName === "National" || regionName === "All Districts (National)";
 }
@@ -379,7 +389,7 @@ app.get("/api/v1/change/:regionName", async (req, res) => {
         WHERE LOWER(dzongkhag) = LOWER($1)
         ORDER BY area_sqkm DESC;
       `;
-      queryParams = [regionName];
+      queryParams = [toTransitionName(regionName)];
     }
 
     const dbResult = await pool.query(queryText, queryParams);
